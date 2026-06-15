@@ -1,271 +1,380 @@
-import pygame
+import tkinter as tk
 import math
 
-pygame.init()
 
-# ==================================
-# WINDOW
-# ==================================
+class ToastSimulation:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Toast Sliding Off a Table Simulation (0.75 m vs 3.0 m)")
 
-WIDTH = 1000
-HEIGHT = 800
+        # Physical constants
+        self.L = 0.15  # Toast length (m)
+        self.g = 9.81  # Gravitational acceleration (m/s²)
+        self.r_g = math.sqrt(self.L**2 / 12)  # Radius of gyration
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Buttered Toast Simulation")
+        # Table height selection
+        self.height_var = tk.DoubleVar(value=0.75)
 
-clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, 40)
+        # Top control panel
+        self.top_frame = tk.Frame(root)
+        self.top_frame.pack(fill=tk.X, side=tk.TOP, pady=5)
 
-# ==================================
-# CONSTANTS
-# ==================================
+        tk.Label(
+            self.top_frame,
+            text="Select Table Height:",
+            font=("Arial", 11, "bold")
+        ).pack(side=tk.LEFT, padx=10)
 
-PIXELS_PER_METER = 180
+        tk.Radiobutton(
+            self.top_frame,
+            text="Standard Table (0.75 m)",
+            variable=self.height_var,
+            value=0.75,
+            command=self.change_height
+        ).pack(side=tk.LEFT, padx=10)
 
-floor_y = 700
+        tk.Radiobutton(
+            self.top_frame,
+            text="Quadruple-Height Table (3.0 m)",
+            variable=self.height_var,
+            value=3.0,
+            command=self.change_height
+        ).pack(side=tk.LEFT, padx=10)
 
-toast_width = 120
-toast_height = 30
+        # Main canvas
+        self.canvas_width = 500
+        self.canvas_height = 600
 
-table_height = 0.75
-
-# ==================================
-# RESET
-# ==================================
-
-def reset():
-
-    global x
-    global y
-    global angle
-    global falling
-    global target_angle
-
-    x = 700
-
-    table_y = floor_y - table_height * PIXELS_PER_METER
-
-    y = table_y - 20
-
-    angle = 0
-    falling = True
-
-    # 논문 결과 근사
-    if table_height <= 0.75:
-
-        target_angle = 180
-
-    elif table_height >= 3.0:
-
-        target_angle = 316
-
-    else:
-
-        target_angle = (
-            180
-            + (316 - 180)
-            * (table_height - 0.75)
-            / (3.0 - 0.75)
+        self.canvas = tk.Canvas(
+            root,
+            width=self.canvas_width,
+            height=self.canvas_height,
+            bg="white"
         )
+        self.canvas.pack()
 
-reset()
+        # Buttons
+        self.btn_frame = tk.Frame(root)
+        self.btn_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=5)
 
-# ==================================
-# MAIN LOOP
-# ==================================
+        tk.Button(
+            self.btn_frame,
+            text="Start",
+            command=self.start_sim
+        ).pack(side=tk.LEFT, padx=10, expand=True, fill=tk.X)
 
-running = True
+        tk.Button(
+            self.btn_frame,
+            text="Reset",
+            command=self.reset_sim
+        ).pack(side=tk.LEFT, padx=10, expand=True, fill=tk.X)
 
-while running:
+        self.change_height()
 
-    for event in pygame.event.get():
+    def change_height(self):
+        self.running = False
+        self.H = self.height_var.get()
 
-        if event.type == pygame.QUIT:
-            running = False
+        if self.H == 0.75:
+            self.scale = 450 / 0.75
+        else:
+            self.scale = 450 / 3.0
 
-        if event.type == pygame.KEYDOWN:
+        self.table_y = 100
+        self.table_x = 180
 
-            if event.key == pygame.K_r:
-                reset()
+        self.reset_simulation()
+        self.draw_scene()
 
-            if event.key == pygame.K_UP:
+    def reset_simulation(self):
+        self.running = False
 
-                table_height = min(
-                    3.0,
-                    table_height + 0.25
+        self.dt = 0.001
+        self.time_elapsed = 0.0
+
+        # Initial conditions
+        self.theta = 0.001
+        self.r = 0.0001
+
+        self.theta_dot = 0.0
+        self.r_dot = 0.01
+
+        self.in_contact = True
+
+        # Free-fall variables
+        self.free_fall_x = 0.0
+        self.free_fall_y = 0.0
+
+        self.free_fall_vx = 0.0
+        self.free_fall_vy = 0.0
+
+    def start_sim(self):
+        if not self.running:
+            self.running = True
+            self.update_physics()
+
+    def reset_sim(self):
+        self.running = False
+        self.reset_simulation()
+        self.draw_scene()
+
+    def update_physics(self):
+        if not self.running:
+            return
+
+        sub_steps = 15
+
+        for _ in range(sub_steps):
+
+            self.time_elapsed += self.dt
+
+            # Table-contact phase
+            if self.in_contact:
+
+                r_ddot = (
+                    self.r * self.theta_dot**2
+                    + self.g * math.sin(self.theta)
                 )
 
-                reset()
+                denominator = self.r**2 + self.r_g**2
 
-            if event.key == pygame.K_DOWN:
+                theta_ddot = (
+                    self.r *
+                    (
+                        self.g * math.cos(self.theta)
+                        - 2 * self.r_dot * self.theta_dot
+                    )
+                ) / denominator
 
-                table_height = max(
-                    0.5,
-                    table_height - 0.25
-                )
+                self.r_dot += r_ddot * self.dt
+                self.r += self.r_dot * self.dt
 
-                reset()
+                self.theta_dot += theta_ddot * self.dt
+                self.theta += self.theta_dot * self.dt
 
-    table_y = floor_y - table_height * PIXELS_PER_METER
+                # Condition for leaving the table edge
+                if (
+                    self.g * math.cos(self.theta)
+                    <=
+                    2 * self.r_dot * self.theta_dot
+                ):
 
-    # =============================
-    # MOTION
-    # =============================
+                    self.in_contact = False
 
-    if falling:
+                    self.free_fall_x = (
+                        self.r * math.cos(self.theta)
+                    )
 
-        distance = floor_y - table_y
+                    self.free_fall_y = (
+                        self.r * math.sin(self.theta)
+                    )
 
-        y += 4
+                    self.free_fall_vx = (
+                        self.r_dot * math.cos(self.theta)
+                        -
+                        self.r * self.theta_dot * math.sin(self.theta)
+                    )
 
-        angle -= target_angle / (distance / 4)
+                    self.free_fall_vy = (
+                        self.r_dot * math.sin(self.theta)
+                        +
+                        self.r * self.theta_dot * math.cos(self.theta)
+                    )
 
-    # =============================
-    # LANDING
-    # =============================
+            # Free-fall phase
+            else:
 
-    if y >= floor_y - toast_height:
+                self.theta += self.theta_dot * self.dt
 
-        y = floor_y - toast_height
+                self.free_fall_vy += self.g * self.dt
 
-        angle = -target_angle
+                self.free_fall_x += self.free_fall_vx * self.dt
+                self.free_fall_y += self.free_fall_vy * self.dt
 
-        falling = False
+        self.draw_scene()
 
-    # =============================
-    # RECTANGLE
-    # =============================
-
-    rad = math.radians(angle)
-
-    ux = math.cos(rad)
-    uy = math.sin(rad)
-
-    vx = -uy
-    vy = ux
-
-    hw = toast_width / 2
-    hh = toast_height / 2
-
-    c1 = (
-        x + ux * hw + vx * hh,
-        y + uy * hw + vy * hh
-    )
-
-    c2 = (
-        x - ux * hw + vx * hh,
-        y - uy * hw + vy * hh
-    )
-
-    c3 = (
-        x - ux * hw - vx * hh,
-        y - uy * hw - vy * hh
-    )
-
-    c4 = (
-        x + ux * hw - vx * hh,
-        y + uy * hw - vy * hh
-    )
-
-    # =============================
-    # DRAW
-    # =============================
-
-    screen.fill((245,245,245))
-
-    # floor
-
-    pygame.draw.line(
-        screen,
-        (200,0,0),
-        (0,floor_y),
-        (WIDTH,floor_y),
-        5
-    )
-
-    # table
-
-    pygame.draw.line(
-        screen,
-        (0,0,0),
-        (150,table_y),
-        (700,table_y),
-        6
-    )
-
-    # bread
-
-    pygame.draw.polygon(
-        screen,
-        (205,170,125),
-        [c1,c2,c3,c4]
-    )
-
-    # butter surface
-
-    butter = [
-
-        c1,
-        c2,
-
-        (
-            c2[0] + vx*8,
-            c2[1] + vy*8
-        ),
-
-        (
-            c1[0] + vx*8,
-            c1[1] + vy*8
-        )
-    ]
-
-    pygame.draw.polygon(
-        screen,
-        (255,220,40),
-        butter
-    )
-
-    pygame.draw.polygon(
-        screen,
-        (90,60,30),
-        [c1,c2,c3,c4],
-        2
-    )
-
-    # info
-
-    info = [
-
-        f"Table Height : {table_height:.2f} m",
-
-     f"Animation Angle : {angle:.1f} deg",
-
-    
-
-    "Paper Result (0.75m) : ~180 deg",
-
-    "Paper Result (3.0m) : ~316.6 deg",
-
-    "UP / DOWN : Change Height",
-
-    "R : Reset"
-    ]
-
-    for i,text in enumerate(info):
-
-        img = font.render(
-            text,
-            True,
-            (0,0,0)
+        current_cm_y = (
+            self.r * math.sin(self.theta)
+            if self.in_contact
+            else self.free_fall_y
         )
 
-        screen.blit(
-            img,
-            (20,20+i*45)
+        if current_cm_y >= self.H:
+            self.running = False
+            return
+
+        self.root.after(10, self.update_physics)
+
+    def draw_scene(self):
+
+        self.canvas.delete("all")
+
+        # Draw table
+        self.canvas.create_rectangle(
+            0,
+            self.table_y,
+            self.table_x,
+            self.canvas_height,
+            fill="#E6D5AC",
+            outline="black"
         )
 
-    pygame.display.flip()
+        self.canvas.create_text(
+            self.table_x - 50,
+            self.table_y + 25,
+            text=f"Table\n({self.H} m)",
+            font=("Arial", 12, "bold"),
+            justify=tk.CENTER
+        )
 
-    clock.tick(60)
+        # Draw floor
+        floor_y = self.table_y + self.H * self.scale
 
-pygame.quit()
+        self.canvas.create_line(
+            0,
+            floor_y,
+            self.canvas_width,
+            floor_y,
+            width=3
+        )
+
+        self.canvas.create_text(
+            50,
+            floor_y - 15,
+            text="Floor",
+            font=("Arial", 11, "italic")
+        )
+
+        # Center-of-mass coordinates
+        if self.in_contact:
+            cm_x = (
+                self.table_x
+                +
+                self.r * math.cos(self.theta) * self.scale
+            )
+
+            cm_y = (
+                self.table_y
+                +
+                self.r * math.sin(self.theta) * self.scale
+            )
+
+        else:
+
+            cm_x = (
+                self.table_x
+                +
+                self.free_fall_x * self.scale
+            )
+
+            cm_y = (
+                self.table_y
+                +
+                self.free_fall_y * self.scale
+            )
+
+        # Toast geometry
+        dx = (
+            self.L / 2
+            * math.cos(self.theta)
+            * self.scale
+        )
+
+        dy = (
+            self.L / 2
+            * math.sin(self.theta)
+            * self.scale
+        )
+
+        end1_x = cm_x - dx
+        end1_y = cm_y - dy
+
+        end2_x = cm_x + dx
+        end2_y = cm_y + dy
+
+        nx = -math.sin(self.theta)
+        ny = math.cos(self.theta)
+
+        thickness = 5
+
+        # Buttered side (red)
+        self.canvas.create_line(
+            end1_x + nx * thickness,
+            end1_y + ny * thickness,
+            end2_x + nx * thickness,
+            end2_y + ny * thickness,
+            width=4,
+            fill="red"
+        )
+
+        # Unbuttered side (black)
+        self.canvas.create_line(
+            end1_x - nx * thickness,
+            end1_y - ny * thickness,
+            end2_x - nx * thickness,
+            end2_y - ny * thickness,
+            width=4,
+            fill="black"
+        )
+
+        # Toast body
+        self.canvas.create_line(
+            end1_x,
+            end1_y,
+            end2_x,
+            end2_y,
+            width=2,
+            fill="#D2691E"
+        )
+
+        # Center of mass marker
+        self.canvas.create_oval(
+            cm_x - 3,
+            cm_y - 3,
+            cm_x + 3,
+            cm_y + 3,
+            fill="yellow"
+        )
+
+        deg = math.degrees(self.theta)
+
+        # Simulation information
+        self.canvas.create_text(
+            330,
+            30,
+            text=f"Rotation Angle: {deg:.1f}°",
+            anchor="w"
+        )
+
+        self.canvas.create_text(
+            330,
+            55,
+            text=f"State: {'On Table' if self.in_contact else 'Free Fall'}",
+            anchor="w"
+        )
+
+        # Final result
+        if not self.running and self.time_elapsed > 0:
+
+            normalized_deg = deg % 360
+
+            if 90 <= normalized_deg < 270:
+                result_text = "Result: Toast Lands Butter-Side Down"
+                color = "red"
+            else:
+                result_text = "Result: Toast Lands Butter-Side Up"
+                color = "green"
+
+            self.canvas.create_text(
+                250,
+                520,
+                text=result_text,
+                fill=color,
+                font=("Arial", 14, "bold")
+            )
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ToastSimulation(root)
+    root.mainloop()
